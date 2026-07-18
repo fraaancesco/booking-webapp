@@ -1,5 +1,6 @@
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { QueryFailedError } from 'typeorm';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { AppException } from '../common/errors/app.exception';
@@ -55,6 +56,33 @@ describe('AuthService', () => {
       expect(usersService.create).toHaveBeenCalledWith(
         'a@a.com',
         'password123',
+      );
+    });
+
+    it('converts a Postgres unique-violation on insert into AUTH_EMAIL_ALREADY_REGISTERED', async () => {
+      usersService.findByEmail.mockResolvedValue(null);
+      const queryFailedError = Object.create(
+        QueryFailedError.prototype,
+      ) as QueryFailedError & {
+        code?: string;
+      };
+      queryFailedError.code = '23505';
+      usersService.create.mockRejectedValue(queryFailedError);
+
+      await expect(
+        authService.register('a@a.com', 'password123'),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.AUTH_EMAIL_ALREADY_REGISTERED },
+      });
+    });
+
+    it('rethrows unrelated errors from user creation as-is', async () => {
+      usersService.findByEmail.mockResolvedValue(null);
+      const dbError = new Error('connection lost');
+      usersService.create.mockRejectedValue(dbError);
+
+      await expect(authService.register('a@a.com', 'password123')).rejects.toBe(
+        dbError,
       );
     });
   });
